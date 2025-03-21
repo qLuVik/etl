@@ -1,0 +1,96 @@
+x-environment: &airflow_environment
+  - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+  - AIRFLOW__CORE__LOAD_DEFAULT_CONNECTIONS=False
+  - AIRFLOW__CORE__LOAD_EXAMPLES=False
+  - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+  - AIRFLOW__CORE__STORE_DAG_CODE=True
+  - AIRFLOW__CORE__STORE_SERIALIZED_DAGS=True
+  - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
+  - AIRFLOW__WEBSERVER__RBAC=False
+  - AIRFLOW__LOGGING__LOGGING_LEVEL=INFO
+
+x-airflow-image: &airflow_image custom-airflow:2.0.0-python3.8
+
+services:
+  postgres:
+    image: postgres:12-alpine
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  init:
+    image: *airflow_image
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: *airflow_environment
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./data:/opt/airflow/data
+      - logs:/opt/airflow/logs
+    entrypoint: >
+      bash -c "
+      airflow db upgrade &&
+      airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.org &&
+      echo 'Airflow init completed.'"
+    healthcheck:
+      test: ["CMD", "airflow", "db", "check"]
+      interval: 10s
+      retries: 5
+      start_period: 10s
+
+  webserver:
+    image: *airflow_image
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    restart: always
+    environment: *airflow_environment
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./data:/opt/airflow/data
+      - logs:/opt/airflow/logs
+    command: webserver
+
+  scheduler:
+    image: *airflow_image
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: always
+    environment: *airflow_environment
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./data:/opt/airflow/data
+      - logs:/opt/airflow/logs
+    command: scheduler
+
+volumes:
+  logs:
+  postgres_data:
+
+
+# sudo docker compose down -v --remove-orphans
+
+#sudo docker compose up --build
+
+
+#На хосте: измени владельца папки ./data
+
+# sudo chown -R 50000:50000 ./data
+
+#Сохрани файл локально
+#Если файл находится в Docker контейнере, сначала вытащи его:
+# sudo docker cp business_case_umbrella-webserver-1:/opt/airflow/data/ml_model.pkl ./ml_model.pkl
